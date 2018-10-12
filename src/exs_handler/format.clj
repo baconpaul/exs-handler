@@ -8,7 +8,7 @@
    [ :sig-value :int ]
    [ :size :int ]
    [ :id :int ]
-   [ :unknown :int ]
+   [ :unknown-hdr :int ]
    [ :tbos :literal (byte-array (map int  [ \T \B \O \S ]))]
    [ :name :string 64 ]
 
@@ -45,6 +45,47 @@
    [:sample-count :int]
    ])
 
+(def chunk-type-sample
+  "The sample chunk contains data about the sample (length and so on) and then the file and path name"
+  [
+   [:unknown-first-int :int] ;; This appears to be the number 44 or 4096. Who knows why?
+   [:length            :int]
+   [:rate              :int]
+   [:bitdepth          :int]
+   [:unknown-region    :slurp-up-to 80]
+   [:path              :string 256]
+   [:file              :string 256]
+   ]
+  )
+
+(def chunk-type-zone
+  "The zone format is full of little bits"
+  [
+   [:open-bitmask :byte]
+   [:rootnote :byte]
+   [:finetune :byte]
+   [:pan :byte]
+   [:volume-adjust :byte]
+   [:scale :byte]
+   [:start-note :byte]
+   [:end-note :byte]
+   [nil :byte]
+   [:min-vel :byte]
+   [:max-vel :byte]
+   [nil :byte]
+   [:sample-start :int]
+   [:sample-end :int]
+   [:loop-start :int]
+   [:loop-end :int]
+   [nil :slurp-up-to 33]
+   [:loop :byte]
+   [nil :slurp-up-to 88]
+   [:group :int]
+   [:sample-index :int]
+   ]
+  )
+
+
 (defn format-byte-size [format]
   (loop [f format
          sz 0
@@ -60,6 +101,8 @@
                   :literal   (count (last ff))
                   :string    (last ff)
 
+                  :slurp-up-to (- (last ff) sz)
+                  
                   :calc      0
                   )
             ]
@@ -83,6 +126,7 @@
           ]
       (loop [f format
              r {}
+             pos 0
              ]
         (if (empty? f) r
             (let [ff (first f)
@@ -110,32 +154,32 @@
                                  )
                                lit
                                )
+
+                    :slurp-up-to (let [ss (last ff)
+                                       ba (byte-array (- ss pos))
+                                       ]
+                                   (.get bb ba)
+                                   ba
+                                   )
                     :calc   (let [cfn (last ff)]
                               (cfn r)
                               )
                     
                     )
+                  npos
+                  (condp = type
+                    :int (+ pos 4)
+                    :byte (+ pos 1)
+                    :string (+ pos (last ff))
+                    :literal (+ pos (count (last ff)))
+                    :slurp-up-to (last ff)
+                    pos
+                    )
                   
                   ]
-              (recur rf (conj (if (nil? name) r (assoc r name value))))
+              (recur rf (conj (if (nil? name) r (assoc r name value))) npos)
               ))
         )
       ))
   )
-
-
-(defn tmp-raw-data [fn]
-  (with-open [in (input-stream (file fn))]
-    (let [buf (byte-array (* 1024 1024))
-          n (.read in buf)
-          ]
-      {:unparsed  (take n  buf)
-       :chunks []})
-    )
-  )
-
-(->  (tmp-raw-data "/Users/paul/Music/Audio Music Apps/Sampler Instruments/Linn Drum Machine.exs")
-     :unparsed
-     (unpack common-84-header)
-     )
 
