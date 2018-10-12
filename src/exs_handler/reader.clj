@@ -1,9 +1,16 @@
 (ns exs-handler.reader
+  (:require [exs-handler.format :as f])
   (:require [clojure.java.io :refer [file output-stream input-stream]])
   (:import [java.nio ByteBuffer ByteOrder])
   )
 
 ;; TODO: Multimethod reader
+(defn unpack-with-format [dat fmt]
+  (-> dat
+      (merge (f/unpack (:chunkdata dat) fmt))
+      (dissoc :chunkdata)
+      )
+  )
 (defmulti unpack-chunk :sig)
 
 (defn unpack-i [d o]
@@ -41,6 +48,7 @@
         (ab :finetune 2)
         (ab :pan 3)
         (ab :volume-adjust 4)
+        (ab :scale 5)
         (ab :start-note 6)
         (ab :end-note 7)
         (ab :min-vel 9)
@@ -74,10 +82,13 @@
         ))
   )
 
+(defmethod unpack-chunk :header [dat] (unpack-with-format dat f/chunk-type-header))
+
 (defmethod unpack-chunk :default [dat]
   (-> dat
       (assoc :error "Parser not implemented")
-      (dissoc :chunkdata)
+      (assoc :data-as-char (map #(if (> % 0) (char %) \.) (:chunkdata dat)))
+      ;;(dissoc :chunkdata)
       )
   )
 
@@ -93,36 +104,7 @@
 
 (defn add-chunk [d c] (update d :chunks conj c))
 
-(defn unpack-common-84 [bts]
-  (let [bb (ByteBuffer/allocate 84)
-        _  (doto bb
-             (.order (ByteOrder/LITTLE_ENDIAN))
-             (.put (byte-array bts) 0 84)
-             (.flip)
-             )
-        sig (.getInt bb)
-        sz  (.getInt bb)
-        id  (.getInt bb)
-        unk (->> bts (drop 12) (take 8))
-        nm (String. (byte-array (take-while (comp not zero?) (drop 20 bts))) "UTF-8")
-        ]
-    {:sig
-     (condp = sig
-       0x00000101 :header
-       0x01000101 :zone
-       0x02000101 :group
-       0x03000101 :sample
-       0x04000101 :param
-       
-       {:unknown-type sig :bytes bts}
-       )
-     :size sz
-     :id id
-     :unk unk
-     :name nm
-     }
-    )
-  )
+(defn unpack-common-84 [bts] (f/unpack bts f/common-84-header) )
 
 (defn parse-chunk [d]
   (let [sigsz (unpack-common-84 (:unparsed d))
@@ -168,6 +150,8 @@
                ))
          )
 
-(->  (read-file "/Users/paul/Music/Audio Music Apps/Sampler Instruments/Linn Drum Machine.exs")
 
-     )
+(->>  (read-file "/Users/paul/Music/Audio Music Apps/Sampler Instruments/SingleSample.exs")
+
+      )
+
